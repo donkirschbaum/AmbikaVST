@@ -8,9 +8,9 @@ on:
 jobs:
   macos:
     name: macOS (Universal VST3 + AU + Standalone)
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Configure
         run: cmake -B build -G Xcode -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
@@ -43,7 +43,7 @@ jobs:
           cp README.md LICENSE dist/
           cd dist && zip -qry ../AmbikaVST-macOS.zip .
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: AmbikaVST-macOS
           path: AmbikaVST-macOS.zip
@@ -52,7 +52,7 @@ jobs:
     name: Linux (VST3, engine tests)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Dependencies
         run: |
           sudo apt-get update
