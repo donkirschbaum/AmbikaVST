@@ -240,11 +240,31 @@ void AmbikaProcessor::resetToDefaults() {
   }
 }
 
-int AmbikaProcessor::getNumPrograms() { return static_cast<int>(factoryPresets().size()); }
+static int numBankPrograms() {
+  int n = 0;
+  bankPrograms(&n);
+  return n;
+}
+
+int AmbikaProcessor::getNumPrograms() {
+  return static_cast<int>(factoryPresets().size()) + numBankPrograms();
+}
+
+juce::String AmbikaProcessor::getProgramBank(int index) const {
+  int own = static_cast<int>(factoryPresets().size());
+  if (index < own) return "Ambika VST";
+  int n = 0;
+  const BankProgram* programs = bankPrograms(&n);
+  return index - own < n ? juce::String(programs[index - own].bank) : juce::String();
+}
 
 const juce::String AmbikaProcessor::getProgramName(int index) {
   if (index < 0 || index >= getNumPrograms()) return {};
-  return factoryPresets()[static_cast<size_t>(index)].name;
+  int own = static_cast<int>(factoryPresets().size());
+  if (index < own) return factoryPresets()[static_cast<size_t>(index)].name;
+  int n = 0;
+  const BankProgram* programs = bankPrograms(&n);
+  return juce::String(programs[index - own].bank) + " / " + programs[index - own].name;
 }
 
 void AmbikaProcessor::setCurrentProgram(int index) { loadPreset(index); }
@@ -252,6 +272,18 @@ void AmbikaProcessor::setCurrentProgram(int index) { loadPreset(index); }
 void AmbikaProcessor::loadPreset(int index) {
   if (index < 0 || index >= getNumPrograms()) return;
   currentProgram = index;
+  int own = static_cast<int>(factoryPresets().size());
+  if (index >= own) {
+    int n = 0;
+    const BankProgram* programs = bankPrograms(&n);
+    juce::MemoryBlock mb;
+    mb.loadFromHexString(programs[index - own].hex);
+    if (mb.getSize() >= sizeof(ambika::Patch) + sizeof(ambika::PartData)) {
+      auto* bytes = static_cast<const uint8_t*>(mb.getData());
+      loadProgramBytes(bytes, bytes + sizeof(ambika::Patch));
+    }
+    return;
+  }
   resetToDefaults();
   ambika::PartData d;
   ambika::InitPartData(&d);
@@ -302,11 +334,63 @@ bool AmbikaProcessor::savePatchFile(const juce::File& f) {
 
 bool AmbikaProcessor::loadPatchFile(const juce::File& f) {
   juce::MemoryBlock mb;
-  if (!f.loadFileAsData(mb) || mb.getSize() < 5 + sizeof(ambika::Patch) + sizeof(ambika::PartData)) return false;
+  if (!f.loadFileAsData(mb) || mb.getSize() < 12) return false;
   auto* bytes = static_cast<const uint8_t*>(mb.getData());
+  const size_t size = mb.getSize();
+  ambika::PartData initPart;
+  ambika::InitPartData(&initPart);
+  // Original Ambika SD card file (.PRO): RIFF "MBKS" with "obj " chunks.
+  if (size >= 12 && std::memcmp(bytes, "RIFF", 4) == 0 && std::memcmp(bytes + 8, "MBKS", 4) == 0) {
+    const uint8_t* patch = nullptr;
+    const uint8_t* part = reinterpret_cast<const uint8_t*>(&initPart);
+    size_t pos = 12;
+    while (pos + 8 <= size) {
+      uint32_t chunk = static_cast<uint32_t>(bytes[pos + 4]) | (static_cast<uint32_t>(bytes[pos + 5]) << 8) |
+                       (static_cast<uint32_t>(bytes[pos + 6]) << 16) | (static_cast<uint32_t>(bytes[pos + 7]) << 24);
+      const uint8_t* body = bytes + pos + 8;
+      if (pos + 8 + chunk > size) break;
+      if (std::memcmp(bytes + pos, "obj ", 4) == 0 && chunk >= 4) {
+        // First object of the file wins (a .MUL loads its first part).
+        if (body[0] == 1 && chunk >= 4 + sizeof(ambika::Patch) && patch == nullptr) patch = body + 4;
+        if (body[0] == 5 && chunk >= 4 + sizeof(ambika::PartData) && part == reinterpret_cast<const uint8_t*>(&initPart)) part = body + 4;
+      }
+      pos += 8 + chunk + (chunk & 1);
+    }
+    if (patch == nullptr) return false;
+    loadProgramBytes(patch, part);
+    return true;
+  }
+  // Ambika SysEx dump (.syx): F0 00 21 02 00 04 cmd arg <nibbles> checksum F7.
+  if (size > 8 && bytes[0] == 0xf0) {
+    std::vector<uint8_t> patch, part;
+    size_t pos = 0;
+    while (pos < size) {
+      while (pos < size && bytes[pos] != 0xf0) ++pos;
+      size_t end = pos;
+      while (end < size && bytes[end] != 0xf7) ++end;
+      if (end - pos > 9 && bytes[pos + 1] == 0x00 && bytes[pos + 2] == 0x21 && bytes[pos + 3] == 0x02 &&
+          bytes[pos + 4] == 0x00 && bytes[pos + 5] == 0x04) {
+        uint8_t command = bytes[pos + 6];
+        std::vector<uint8_t> payload;
+        for (size_t i = pos + 8; i + 1 < end - 2; i += 2)
+          payload.push_back(static_cast<uint8_t>((bytes[i] << 4) | (bytes[i + 1] & 0x0f)));
+        if (command == 1 && payload.size() >= sizeof(ambika::Patch)) patch = payload;
+        if (command == 5 && payload.size() >= sizeof(ambika::PartData)) part = payload;
+      }
+      pos = end + 1;
+    }
+    if (patch.empty()) return false;
+    loadProgramBytes(patch.data(), part.empty() ? reinterpret_cast<const uint8_t*>(&initPart) : part.data());
+    return true;
+  }
+  if (size < 5 + sizeof(ambika::Patch) + sizeof(ambika::PartData)) return false;
   if (std::memcmp(bytes, "AMBK", 4) != 0) return false;
   const uint8_t* pb = bytes + 5;
-  const uint8_t* db = pb + sizeof(ambika::Patch);
+  loadProgramBytes(pb, pb + sizeof(ambika::Patch));
+  return true;
+}
+
+void AmbikaProcessor::loadProgramBytes(const uint8_t* pb, const uint8_t* db) {
   for (auto& def : paramDefs()) {
     if (def.level == Level::Plugin) continue;
     uint8_t raw = def.level == Level::Patch ? pb[def.offset] : db[def.offset];
@@ -315,7 +399,6 @@ bool AmbikaProcessor::loadPatchFile(const juce::File& f) {
     if (auto* p = apvts.getParameter(def.id)) p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(v)));
   }
   for (int i = 0; i < 64; ++i) setSequenceByte(i, db[16 + i]);
-  return true;
 }
 
 // ------------------------------------------------------------------- state --

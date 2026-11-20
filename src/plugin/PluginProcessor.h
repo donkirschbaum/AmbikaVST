@@ -40,6 +40,9 @@ class AmbikaProcessor : public juce::AudioProcessor, private juce::AsyncUpdater 
   // Editor helpers.
   juce::AudioProcessorValueTreeState& state() { return apvts; }
   void loadPreset(int index);
+  juce::String getProgramBank(int index) const;
+  // Loads raw Ambika memory: 112 bytes of patch and 84 bytes of part data.
+  void loadProgramBytes(const uint8_t* patch, const uint8_t* part);
   void randomizePatch();
   uint8_t getSequenceByte(int i) const { return sequence[static_cast<size_t>(i)].load(); }
   void setSequenceByte(int i, uint8_t v) { sequence[static_cast<size_t>(i)].store(v); }

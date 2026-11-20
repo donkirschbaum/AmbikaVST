@@ -94,16 +94,93 @@ void LcdDisplay::paint(juce::Graphics& g) {
     const juce::String& line = row == 0 ? line1 : line2;
     for (int c = 0; c < cols; ++c) {
       auto cell = juce::Rectangle<float>(screen.getX() + c * cw, screen.getY() + row * ch, cw, ch).reduced(1.0f, 4.0f);
-      g.setColour(kLcdBack.brighter(0.08f));
+      const bool inCursor = cursor >= 0 && row == cursor / 4 && c >= (cursor % 4) * 10 && c < (cursor % 4) * 10 + 9;
+      g.setColour(inCursor ? kLcdInk : kLcdBack.brighter(0.08f));
       g.fillRect(cell);
       if (c < line.length() && line[c] != ' ') {
-        g.setColour(kLcdInk);
+        g.setColour(inCursor ? kLcdBack.darker(0.2f) : kLcdInk);
         float baseline = cell.getCentreY() + font.getAscent() * 0.5f - font.getDescent() * 0.35f;
         g.drawSingleLineText(line.substring(c, c + 1), juce::roundToInt(cell.getCentreX()),
                              juce::roundToInt(baseline), juce::Justification::horizontallyCentred);
       }
     }
   }
+}
+
+void LcdDisplay::mouseDown(const juce::MouseEvent& e) {
+  auto screen = getLocalBounds().toFloat().reduced(8.0f);
+  int col = static_cast<int>((e.position.x - screen.getX()) / (screen.getWidth() / 40.0f));
+  int row = e.position.y < screen.getCentreY() ? 0 : 1;
+  if (col < 0 || col >= 40 || col % 10 == 9) return;
+  if (onCellClicked) onCellClicked(row * 4 + col / 10);
+}
+
+// ---------------------------------------------------------------- encoder --
+void EncoderKnob::paint(juce::Graphics& g) {
+  auto r = getLocalBounds().toFloat();
+  auto knob = juce::Rectangle<float>(juce::jmin(r.getWidth(), r.getHeight()) - 6.0f,
+                                     juce::jmin(r.getWidth(), r.getHeight()) - 6.0f).withCentre(r.getCentre());
+  auto c = knob.getCentre();
+  float radius = knob.getWidth() * 0.5f;
+  // Knurled skirt.
+  g.setColour(juce::Colour(0xff0b0c0d));
+  g.fillEllipse(knob);
+  g.setColour(juce::Colour(0xff3c3f44));
+  for (int i = 0; i < 36; ++i) {
+    float a = angle + i * juce::MathConstants<float>::twoPi / 36.0f;
+    g.drawLine({c.getPointOnCircumference(radius - 1.0f, a), c.getPointOnCircumference(radius - 6.0f, a)}, 1.4f);
+  }
+  auto cap = knob.reduced(radius * 0.22f);
+  if (pressed) cap = cap.reduced(1.5f);
+  g.setGradientFill(juce::ColourGradient(juce::Colour(0xff8d9096), cap.getX(), cap.getY(),
+                                         juce::Colour(0xff2b2d31), cap.getRight(), cap.getBottom(), false));
+  g.fillEllipse(cap);
+  g.setColour(juce::Colours::black.withAlpha(0.6f));
+  g.drawEllipse(cap, 1.0f);
+  // Dimple.
+  auto dimple = juce::Rectangle<float>(7.0f, 7.0f).withCentre(c.getPointOnCircumference(cap.getWidth() * 0.32f, angle));
+  g.setColour(juce::Colour(0xff1a1b1d));
+  g.fillEllipse(dimple);
+}
+
+void EncoderKnob::mouseDown(const juce::MouseEvent& e) {
+  lastY = e.getPosition().y;
+  dragAccumulator = 0.0f;
+  dragged = false;
+  pressed = true;
+  repaint();
+}
+
+void EncoderKnob::mouseDrag(const juce::MouseEvent& e) {
+  int dy = lastY - e.getPosition().y;
+  lastY = e.getPosition().y;
+  dragAccumulator += static_cast<float>(dy);
+  if (std::abs(e.getDistanceFromDragStart()) > 3) { dragged = true; pressed = false; }
+  const float pixelsPerStep = 7.0f;
+  while (std::abs(dragAccumulator) >= pixelsPerStep) {
+    int step = dragAccumulator > 0 ? 1 : -1;
+    dragAccumulator -= step * pixelsPerStep;
+    angle += step * 0.2f;
+    if (onTurn) onTurn(step);
+  }
+  repaint();
+}
+
+void EncoderKnob::mouseUp(const juce::MouseEvent&) {
+  if (!dragged && onPush) onPush();
+  pressed = false;
+  repaint();
+}
+
+void EncoderKnob::mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails& w) {
+  wheelAccumulator += (w.isReversed ? -w.deltaY : w.deltaY) * 8.0f;
+  while (std::abs(wheelAccumulator) >= 1.0f) {
+    int step = wheelAccumulator > 0 ? 1 : -1;
+    wheelAccumulator -= static_cast<float>(step);
+    angle += step * 0.2f;
+    if (onTurn) onTurn(step);
+  }
+  repaint();
 }
 
 // ------------------------------------------------------- sequence editor --
@@ -265,6 +342,15 @@ AmbikaEditor::AmbikaEditor(AmbikaProcessor& p)
   currentSub.assign(pages.size(), 0);
 
   addAndMakeVisible(lcd);
+  lcd.onCellClicked = [this](int cell) { setCursorCell(cell); };
+  addAndMakeVisible(encoder);
+  encoder.onTurn = [this](int steps) { encoderTurn(steps); };
+  encoder.onPush = [this] { encoderPush(); };
+  encoderLabel.setText("PUSH", juce::dontSendNotification);
+  encoderLabel.setJustificationType(juce::Justification::centred);
+  encoderLabel.setFont(juce::FontOptions(9.0f, juce::Font::bold));
+  encoderLabel.setColour(juce::Label::textColourId, kInkDim);
+  addAndMakeVisible(encoderLabel);
   pageTitle.setFont(juce::FontOptions(12.0f, juce::Font::bold));
   pageTitle.setColour(juce::Label::textColourId, kInkDim);
   addAndMakeVisible(pageTitle);
@@ -321,7 +407,7 @@ AmbikaEditor::AmbikaEditor(AmbikaProcessor& p)
                          });
   };
   loadButton.onClick = [this] {
-    chooser = std::make_unique<juce::FileChooser>("Load Ambika patch", juce::File(), "*.ambk");
+    chooser = std::make_unique<juce::FileChooser>("Load Ambika patch", juce::File(), "*.ambk;*.pro;*.PRO;*.syx;*.mul;*.MUL");
     chooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                          [this](const juce::FileChooser& fc) {
                            auto f = fc.getResult();
@@ -362,8 +448,58 @@ AmbikaEditor::~AmbikaEditor() {
 
 void AmbikaEditor::refreshPresetBox() {
   presetBox.clear(juce::dontSendNotification);
-  for (int i = 0; i < proc.getNumPrograms(); ++i) presetBox.addItem(proc.getProgramName(i), i + 1);
+  auto* root = presetBox.getRootMenu();
+  juce::String currentBank;
+  juce::PopupMenu sub;
+  auto flush = [&] {
+    if (currentBank.isNotEmpty()) root->addSubMenu(currentBank + "  (" + juce::String(sub.getNumItems()) + ")", sub);
+    sub = juce::PopupMenu();
+  };
+  for (int i = 0; i < proc.getNumPrograms(); ++i) {
+    juce::String bank = proc.getProgramBank(i);
+    if (bank != currentBank) { flush(); currentBank = bank; }
+    juce::String name = proc.getProgramName(i).fromLastOccurrenceOf(" / ", false, false);
+    sub.addItem(i + 1, juce::String(i + 1).paddedLeft('0', 4) + "  " + name);
+  }
+  flush();
+  presetBox.setTextWhenNothingSelected("Presets");
   presetBox.setSelectedId(proc.getCurrentProgram() + 1, juce::dontSendNotification);
+}
+
+void AmbikaEditor::setCursorCell(int cell) {
+  cursorCell = juce::jlimit(0, 7, cell);
+  lcd.setCursor(pages[static_cast<size_t>(currentPage)].button == "SEQ" ? -1 : cursorCell);
+}
+
+void AmbikaEditor::encoderPush() {
+  const auto& sp = pages[static_cast<size_t>(currentPage)].subpages[static_cast<size_t>(currentSub[static_cast<size_t>(currentPage)])];
+  for (int n = 1; n <= 8; ++n) {
+    int c = (cursorCell + n) % 8;
+    if (sp.params[static_cast<size_t>(c)] != nullptr) { setCursorCell(c); return; }
+  }
+}
+
+void AmbikaEditor::encoderTurn(int steps) {
+  // On the sequencer page (no parameter cells) the encoder browses programs.
+  if (pages[static_cast<size_t>(currentPage)].button == "SEQ") {
+    int n = proc.getNumPrograms();
+    proc.loadPreset(((proc.getCurrentProgram() + steps) % n + n) % n);
+    return;
+  }
+  const auto& sp = pages[static_cast<size_t>(currentPage)].subpages[static_cast<size_t>(currentSub[static_cast<size_t>(currentPage)])];
+  const char* id = sp.params[static_cast<size_t>(cursorCell)];
+  if (id == nullptr) return;
+  auto* param = proc.state().getParameter(id);
+  const ParamDef* def = findParam(id);
+  if (param == nullptr || def == nullptr) return;
+  int v = juce::roundToInt(param->convertFrom0to1(param->getValue()));
+  int nv = juce::jlimit(def->minValue, def->maxValue, v + steps);
+  if (nv == v) return;
+  param->beginChangeGesture();
+  param->setValueNotifyingHost(param->convertTo0to1(static_cast<float>(nv)));
+  param->endChangeGesture();
+  touchedParam = def;
+  touchedTicks = 45;
 }
 
 void AmbikaEditor::selectPage(int page, bool cycle) {
@@ -378,6 +514,9 @@ void AmbikaEditor::selectPage(int page, bool cycle) {
   for (auto& l : knobLabels) l.setVisible(!seq);
   for (auto& l : knobValues) l.setVisible(!seq);
   attachKnobs();
+  const auto& spNow = pages[static_cast<size_t>(page)].subpages[static_cast<size_t>(currentSub[static_cast<size_t>(page)])];
+  if (spNow.params[static_cast<size_t>(cursorCell)] == nullptr) cursorCell = 0;
+  setCursorCell(cursorCell);
   updateLcd();
   repaint();
 }
@@ -395,7 +534,7 @@ void AmbikaEditor::attachKnobs() {
     if (id != nullptr) {
       knobAttachments[i] = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(proc.state(), id, k);
       const ParamDef* def = findParam(id);
-      k.onDragStart = [this, def] { touchedParam = def; touchedTicks = 45; };
+      k.onDragStart = [this, def, i] { touchedParam = def; touchedTicks = 45; setCursorCell(static_cast<int>(i)); };
       k.onValueChange = [this, def] { touchedParam = def; touchedTicks = 45; };
       k.setEnabled(true);
       k.setAlpha(1.0f);
@@ -552,7 +691,9 @@ void AmbikaEditor::paint(juce::Graphics& g) {
 }
 
 void AmbikaEditor::resized() {
-  lcd.setBounds(24, 74, 620, 96);
+  lcd.setBounds(24, 74, 540, 96);
+  encoder.setBounds(574, 74, 72, 72);
+  encoderLabel.setBounds(574, 148, 72, 14);
   pageTitle.setBounds(28, 52, 600, 18);
   const int knobW = 620 / 8;
   for (int i = 0; i < 8; ++i) {

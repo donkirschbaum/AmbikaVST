@@ -10,7 +10,7 @@ int main() {
   const int block = 256;
   proc.setPlayConfigDetails(0, 2, sr, block);
   proc.prepareToPlay(sr, block);
-  int failures = 0;
+  int failures = 0, nanCount = 0, silentCount = 0, loudCount = 0;
   for (int p = 0; p < proc.getNumPrograms(); ++p) {
     proc.setCurrentProgram(p);
     juce::AudioBuffer<float> buf(2, block);
@@ -31,11 +31,20 @@ int main() {
       }
     }
     double rms = std::sqrt(sum / count);
-    bool silent = rms < 0.005;
+    bool silent = rms < 0.002;
     bool loud = peak > 1.5;
-    if (bad || silent || loud) ++failures;
-    std::printf("%-18s peak %.3f rms %.3f %s%s%s\n", proc.getProgramName(p).toRawUTF8(), peak, rms,
-                bad ? "NAN " : "", silent ? "SILENT " : "", loud ? "TOO LOUD" : "");
+    if (bad || loud) ++failures;  // silence can be legitimate (drum parts, seq-only)
+    if (bad || silent || loud || p < 16)
+      std::printf("%4d %-40s peak %.3f rms %.3f %s%s%s\n", p, proc.getProgramName(p).toRawUTF8(), peak, rms,
+                  bad ? "NAN " : "", silent ? "SILENT " : "", loud ? "TOO LOUD" : "");
+    nanCount += bad; silentCount += silent; loudCount += loud;
+  }
+  std::printf("programs: %d  nan: %d  silent: %d  too loud: %d\n", proc.getNumPrograms(), nanCount, silentCount, loudCount);
+  // Original Ambika .PRO file import.
+  if (const char* pro = std::getenv("AMBIKA_TEST_PRO")) {
+    bool ok = proc.loadPatchFile(juce::File(pro));
+    std::printf(".PRO import: %s (osc1_shape=%d)\n", ok ? "OK" : "FAIL", (int)proc.state().getRawParameterValue("osc1_shape")->load());
+    if (!ok) ++failures;
   }
   // State round trip.
   juce::MemoryBlock mb;

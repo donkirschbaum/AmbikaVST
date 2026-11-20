@@ -59,7 +59,9 @@ Die Oberfläche folgt der Hardware: **40×2-LCD**, darunter **8 Potis**, darunte
 | PART | 3 | Part (Volume, Octave, Tune, Spread, Raga, Legato, Portamento, Polyphonie-Modus) · Arp/Seq · Clock/Setup |
 | SEQ | – | Grafischer Editor für Seq 1, Seq 2 und Notenpattern (Balken ziehen; G/L-Reihe: Gate/Legato) |
 
-Rechts: Presets (16 Werks-Presets, Laden/Speichern von `.ambk`-Patchdateien im Ambika-Speicherlayout, Randomize), Voicecard-LEDs, Wahl der Filterkarte, Output, Stereo-Spread, Rauschen, Anzahl Voicecards (1–6).
+**Drehgeber (Encoder)** rechts neben dem LCD, wie auf der Hardware: Drehen (ziehen oder Mausrad) ändert den im LCD markierten Parameter in Einzelschritten, Drücken (klicken) setzt den Cursor auf den nächsten Parameter. Ein Klick ins LCD oder das Anfassen eines Potis setzt den Cursor ebenfalls. Auf der SEQ-Seite blättert der Encoder durch die Programme.
+
+Rechts: **1074 Presets** in Bänken (Golden Card der Original-Ambika mit Factory A, B, F, Multis und früher Werksbank, Community-Bänke und konvertierte Shruthi-Bänke; Details in `PRESETS.md`), Laden von Original-Ambika-Dateien (`.PRO`, `.syx`, `.MUL`) und Speichern als `.ambk`, Randomize, Voicecard-LEDs, Wahl der Filterkarte, Output, Stereo-Spread, Rauschen, Anzahl Voicecards (1–6).
 
 **Clock:** Standard ist „host“: Arpeggiator, Sequencer und synchronisierte LFOs laufen zum DAW-Tempo (24 ppqn) und starten mit dem Transport. Bei gestopptem Transport bzw. mit „internal“ startet die interne Clock wie auf der Hardware mit der ersten Note und stoppt nach der „Latch“-Zeit.
 
@@ -69,7 +71,7 @@ Rechts: Presets (16 Werks-Presets, Laden/Speichern von `.ambk`-Patchdateien im A
 
 - **Ein Part pro Instanz.** Die Ambika ist 6-fach multitimbral; im Plugin entspricht das sechs Instanzen mit jeweils eigener Voicecard-Anzahl.
 - **Chain-Modus** verhält sich wie Poly (es gibt keine zweite Ambika zum Verketten).
-- Keine SD-Karte, kein SysEx-Import von Original-Dumps, keine Performance-Seite. Die `.ambk`-Dateien nutzen aber exakt das Byte-Layout von Patch (112 Bytes) und Part (84 Bytes).
+- Keine SD-Karte und keine Performance-Seite. Original-`.PRO`-, `.syx`- und `.MUL`-Dateien lassen sich aber laden, und die `.ambk`-Dateien nutzen exakt das Byte-Layout von Patch (112 Bytes) und Part (84 Bytes).
 - Die Hardware rendert LFO 1–3 bei ~976 Hz auf dem Mainboard, das Plugin bei der Voicecard-Blockrate (~980 Hz). Der Unterschied ist nicht hörbar.
 - Synchronisierte LFO-Rate „1/96“: In der Firmware läuft der Phasenwert über (Wert 65536 in 16 Bit), das Plugin nutzt 65535.
 
@@ -79,7 +81,8 @@ Rechts: Presets (16 Werks-Presets, Laden/Speichern von `.ambk`-Patchdateien im A
 src/engine/   Portierte Firmware (voicecard.cc, part.cc), Tabellen, Analogmodelle, Engine
 src/plugin/   JUCE-Plugin: Parameter, Prozessor, Oberfläche, Presets
 tools/        render_test (Engine → WAV), preset_test (alle Presets durch das Plugin),
-              gen_resources.py (Konvertierung der Firmware-Tabellen)
+              gen_resources.py (Konvertierung der Firmware-Tabellen),
+              import_presets.py (Programme aus .PRO/.MUL/.syx → FactoryBank.inc)
 ```
 
 Tests unter Linux/macOS:

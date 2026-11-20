@@ -21,9 +21,34 @@ class LcdDisplay : public juce::Component {
   void setLines(const juce::String& a, const juce::String& b) {
     if (a != line1 || b != line2) { line1 = a; line2 = b; repaint(); }
   }
+  // Cursor on one of the 8 parameter cells (-1 = none).
+  void setCursor(int cell) { if (cell != cursor) { cursor = cell; repaint(); } }
   void paint(juce::Graphics&) override;
+  void mouseDown(const juce::MouseEvent&) override;
+  std::function<void(int)> onCellClicked;
  private:
   juce::String line1, line2;
+  int cursor = -1;
+};
+
+// The Ambika's clickable endless encoder: turn = step the value under the
+// cursor, push = move the cursor to the next parameter.
+class EncoderKnob : public juce::Component {
+ public:
+  void paint(juce::Graphics&) override;
+  void mouseDown(const juce::MouseEvent&) override;
+  void mouseDrag(const juce::MouseEvent&) override;
+  void mouseUp(const juce::MouseEvent&) override;
+  void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+  std::function<void(int)> onTurn;
+  std::function<void()> onPush;
+ private:
+  float angle = 0.0f;
+  float dragAccumulator = 0.0f;
+  int lastY = 0;
+  bool dragged = false;
+  bool pressed = false;
+  float wheelAccumulator = 0.0f;
 };
 
 class SequenceEditor : public juce::Component {
@@ -60,6 +85,12 @@ class AmbikaEditor : public juce::AudioProcessorEditor, private juce::Timer {
   AmbikaProcessor& proc;
   AmbikaLookAndFeel lnf;
   LcdDisplay lcd;
+  EncoderKnob encoder;
+  juce::Label encoderLabel;
+  int cursorCell = 0;
+  void encoderTurn(int steps);
+  void encoderPush();
+  void setCursorCell(int cell);
   juce::Label pageTitle;
   std::array<juce::Slider, 8> knobs;
   std::array<juce::Label, 8> knobLabels;

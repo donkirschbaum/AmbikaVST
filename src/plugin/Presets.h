@@ -12,6 +12,22 @@ struct Preset {
   std::vector<std::pair<const char*, int>> values;
 };
 
+// Programs imported from Ambika .PRO / .MUL / .syx files (patch + part data
+// as hex). See PRESETS.md for sources and credits.
+struct BankProgram {
+  const char* bank;
+  const char* name;
+  const char* hex;  // 196 bytes = 112 patch + 84 part, hex encoded
+};
+
+inline const BankProgram* bankPrograms(int* count) {
+  static const BankProgram programs[] = {
+#include "FactoryBank.inc"
+  };
+  *count = static_cast<int>(sizeof(programs) / sizeof(programs[0]));
+  return programs;
+}
+
 inline const std::vector<Preset>& factoryPresets() {
   static const std::vector<Preset> presets = {
     {"Init", {}},
