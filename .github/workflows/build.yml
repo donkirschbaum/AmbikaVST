@@ -54,13 +54,20 @@ jobs:
           path: AmbikaVST-macOS.zip
 
       - name: Publish GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" AmbikaVST-macOS.zip \
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="v1.0.${GITHUB_RUN_NUMBER}"
+          fi
+          gh release create "${TAG}" AmbikaVST-macOS.zip \
             --repo "${GITHUB_REPOSITORY}" \
-            --title "Ambika VST ${GITHUB_REF_NAME}" \
+            --target "${GITHUB_SHA}" \
+            --latest \
+            --title "Ambika VST ${TAG}" \
             --notes "Fertiges Plugin für macOS (Universal: Apple Silicon + Intel): VST3, AU und Standalone-App. Installation siehe README."
 
   linux:
